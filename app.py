@@ -1,132 +1,84 @@
-
-from flask import Flask, request, jsonify, session
+from flask import Flask, request, jsonify, session, render_template
 from flask_sqlalchemy import SQLAlchemy
-from werkzeug.security import generate_password_hash, check_password_hash
-import random
+import os
 
 app = Flask(__name__)
-app.secret_key = 'your_secret_key'
+app.secret_key = os.urandom(24)
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///gambling.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
 db = SQLAlchemy(app)
 
-# Database Models
+# User model
 class User(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    username = db.Column(db.String(50), unique=True, nullable=False)
-    password = db.Column(db.String(200), nullable=False)
+    username = db.Column(db.String(80), unique=True, nullable=False)
     balance = db.Column(db.Float, default=0.0)
-    is_owner = db.Column(db.Boolean, default=False)
 
-class GameHistory(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
-    game = db.Column(db.String(50), nullable=False)
-    result = db.Column(db.String(50), nullable=False)
-    amount = db.Column(db.Float, nullable=False)
+def initialize_db():
+    with app.app_context():
+        db.create_all()
 
-# Helper Functions
-def add_user(username, password, is_owner=False):
-    hashed_password = generate_password_hash(password, method='sha256')
-    new_user = User(username=username, password=hashed_password, is_owner=is_owner)
-    db.session.add(new_user)
-    db.session.commit()
+# Home route
+@app.route('/')
+def home():
+    return render_template('index.html')
 
-@app.route('/register', methods=['POST'])
-def register():
-    data = request.json
-    if User.query.filter_by(username=data['username']).first():
-        return jsonify({"message": "Username already exists"}), 400
-    add_user(data['username'], data['password'])
-    return jsonify({"message": "User registered successfully"})
-
-@app.route('/login', methods=['POST'])
-def login():
-    data = request.json
-    user = User.query.filter_by(username=data['username']).first()
-    if user and check_password_hash(user.password, data['password']):
-        session['user_id'] = user.id
-        session['is_owner'] = user.is_owner
-        return jsonify({"message": "Login successful"})
-    return jsonify({"message": "Invalid credentials"}), 401
-
-@app.route('/logout', methods=['POST'])
-def logout():
-    session.clear()
-    return jsonify({"message": "Logged out"})
-
-@app.route('/balance', methods=['GET'])
-def get_balance():
-    if 'user_id' not in session:
-        return jsonify({"message": "Unauthorized"}), 401
-    user = User.query.get(session['user_id'])
-    return jsonify({"balance": user.balance})
-
+# Blackjack route
 @app.route('/blackjack', methods=['POST'])
 def play_blackjack():
-    if 'user_id' not in session:
-        return jsonify({"message": "Unauthorized"}), 401
+    # Add your Blackjack game logic here
+    return jsonify({"message": "Blackjack game is not implemented yet!"})
 
-    user = User.query.get(session['user_id'])
-    bet = request.json.get('bet')
-    if bet > user.balance:
-        return jsonify({"message": "Insufficient balance"}), 400
-
-    user.balance -= bet
-
-    player_score = random.randint(15, 21)
-    dealer_score = random.randint(17, 21)
-    result = ""
-
-    if player_score > dealer_score or dealer_score > 21:
-        result = "win"
-        user.balance += bet * 2
-    else:
-        result = "lose"
-
-    db.session.add(GameHistory(user_id=user.id, game="Blackjack", result=result, amount=bet))
-    db.session.commit()
-    return jsonify({"result": result, "player_score": player_score, "dealer_score": dealer_score, "balance": user.balance})
-
+# Plinko route
 @app.route('/plinko', methods=['POST'])
 def play_plinko():
-    if 'user_id' not in session:
-        return jsonify({"message": "Unauthorized"}), 401
+    # Add your Plinko game logic here
+    return jsonify({"message": "Plinko game is not implemented yet!"})
 
-    user = User.query.get(session['user_id'])
-    bet = request.json.get('bet')
-    if bet > user.balance:
-        return jsonify({"message": "Insufficient balance"}), 400
+# Admin route to add balance
+@app.route('/admin/add_balance', methods=['POST'])
+def admin_add_balance():
+    if 'is_admin' in session and session['is_admin']:
+        data = request.json
+        username = data.get('username')
+        amount = data.get('amount', 0)
 
-    user.balance -= bet
-    outcome = random.choices(["lose", "win", "jackpot"], weights=[70, 25, 5], k=1)[0]
+        user = User.query.filter_by(username=username).first()
+        if user:
+            user.balance += amount
+            db.session.commit()
+            return jsonify({"message": f"Added {amount} to {username}'s balance."})
+        else:
+            return jsonify({"error": "User not found."}), 404
+    return jsonify({"error": "Unauthorized."}), 403
 
-    if outcome == "win":
-        user.balance += bet * 1.5
-    elif outcome == "jackpot":
-        user.balance += bet * 10
-
-    db.session.add(GameHistory(user_id=user.id, game="Plinko", result=outcome, amount=bet))
-    db.session.commit()
-    return jsonify({"result": outcome, "balance": user.balance})
-
-@app.route('/owner/add_balance', methods=['POST'])
-def add_balance():
-    if 'user_id' not in session or not session.get('is_owner', False):
-        return jsonify({"message": "Unauthorized"}), 401
-
+# Admin login route
+@app.route('/admin/login', methods=['POST'])
+def admin_login():
     data = request.json
-    user = User.query.filter_by(username=data['username']).first()
-    if not user:
-        return jsonify({"message": "User not found"}), 404
+    username = data.get('username')
+    password = data.get('password')
 
-    user.balance += data['amount']
-    db.session.commit()
-    return jsonify({"message": "Balance updated", "new_balance": user.balance})
+    if username == 'admin' and password == 'password':  # Change this to a secure login method
+        session['is_admin'] = True
+        return jsonify({"message": "Admin logged in successfully."})
+    return jsonify({"error": "Invalid credentials."}), 401
+
+# User balance check route
+@app.route('/balance', methods=['GET'])
+def check_balance():
+    if 'username' in session:
+        user = User.query.filter_by(username=session['username']).first()
+        if user:
+            return jsonify({"balance": user.balance})
+    return jsonify({"error": "Unauthorized."}), 403
+
+# Static folder setup
+@app.route('/static/<path:path>')
+def static_files(path):
+    return app.send_static_file(path)
 
 if __name__ == '__main__':
-    db.create_all()
-    # Uncomment to create the owner account on first run
-    # add_user("owner", "ownerpassword", is_owner=True)
+    initialize_db()
     app.run(debug=True)
